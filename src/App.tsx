@@ -6,6 +6,7 @@ import { Features } from './components/Features';
 import { HowItWorks } from './components/HowItWorks';
 import { Contact } from './components/Contact';
 import { Footer } from './components/Footer';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 function App() {
   const [demoState, setDemoState] = useState<DemoState>('selection');
@@ -42,11 +43,13 @@ function App() {
         <Hero onDemoClick={handleDemoClick} />
         
         {showDemo && (
-          <DemoFlow 
-            demoState={demoState} 
-            setDemoState={setDemoState} 
-            onClose={handleCloseDemo} 
-          />
+          <ErrorBoundary>
+            <DemoFlow 
+              demoState={demoState} 
+              setDemoState={setDemoState} 
+              onClose={handleCloseDemo} 
+            />
+          </ErrorBoundary>
         )}
         
         <Features />

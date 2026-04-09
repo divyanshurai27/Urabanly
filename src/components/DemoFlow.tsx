@@ -1,12 +1,16 @@
 import { useState } from 'react';
-import { MapPin, Package, ArrowLeft, ArrowRight, Loader2 } from 'lucide-react';
+import { MapPin, Package, ArrowLeft, ArrowRight, Loader2, Sparkles, AlertCircle } from 'lucide-react';
+import { PremiumDashboard } from './PremiumDashboard';
+import { LoginModal } from './LoginModal';
+import { analyzeLocation, analyzeProduct, LocationResponse, ProductResponse } from '../services/api';
 
 export type DemoState = 
   | 'selection' 
   | 'location-input' 
   | 'product-input' 
   | 'loading' 
-  | 'results';
+  | 'results'
+  | 'premium';
 
 interface DemoFlowProps {
   demoState: DemoState;
@@ -18,81 +22,89 @@ export function DemoFlow({ demoState, setDemoState, onClose }: DemoFlowProps) {
   const [locationInput, setLocationInput] = useState('');
   const [productInput, setProductInput] = useState('');
   const [budget, setBudget] = useState('');
-  const [results, setResults] = useState<null | {
-    score: number;
-    metrics: {
-      footTraffic: { level: string; score: number };
-      competition: { level: string; score: number };
-      spendingPower: { level: string; score: number };
-      populationDensity: { level: string; score: number };
-    };
-    recommendations: Array<{ title: string; explanation: string }>;
+  const [isPremiumUnlocked, setIsPremiumUnlocked] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [results, setResults] = useState<null | (LocationResponse | ProductResponse) & { 
+    inputValue: string; 
+    flowType: 'location' | 'product';
+    error?: string;
   }>(null);
+  const [apiStatus, setApiStatus] = useState<{
+    gemini_used?: boolean;
+    fallback_used?: boolean;
+    fallback_reason?: string | null;
+  }>({});
 
-  const handleLocationSubmit = () => {
+  const handleLocationSubmit = async () => {
     if (!locationInput.trim()) return;
     setDemoState('loading');
+    setResults(null);
     
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      const data = await analyzeLocation(locationInput);
+      setApiStatus({
+        gemini_used: data.gemini_used,
+        fallback_used: data.fallback_used,
+        fallback_reason: data.fallback_reason
+      });
       setResults({
-        score: 87,
-        metrics: {
-          footTraffic: { level: 'High', score: 92 },
-          competition: { level: 'Medium', score: 65 },
-          spendingPower: { level: 'High', score: 88 },
-          populationDensity: { level: 'Very High', score: 95 },
-        },
-        recommendations: [
-          { 
-            title: 'Coffee Shop', 
-            explanation: 'Strong foot traffic and high spending power make this ideal for premium coffee.' 
-          },
-          { 
-            title: 'Quick Service Restaurant', 
-            explanation: 'Dense population with busy professionals seeking convenient dining.' 
-          },
-          { 
-            title: 'Boutique Fitness Studio', 
-            explanation: 'Health-conscious demographic with disposable income for wellness.' 
-          },
-        ],
+        ...data,
+        inputValue: locationInput,
+        flowType: 'location',
       });
       setDemoState('results');
-    }, 2000);
+    } catch (error) {
+      console.error('API Error:', error);
+      setResults({
+        location: locationInput,
+        score: 0,
+        metrics: {
+          foot_traffic: { level: 'Unknown', score: 0 },
+          competition: { level: 'Unknown', score: 0 },
+          spending_power: { level: 'Unknown', score: 0 },
+          population_density: { level: 'Unknown', score: 0 },
+        },
+        area_type: 'Unknown',
+        demand_trend: 'Unknown',
+        is_estimated: true,
+        recommendations: [],
+        error: error instanceof Error ? error.message : 'Failed to analyze location',
+        inputValue: locationInput,
+        flowType: 'location',
+      });
+      setDemoState('results');
+    }
   };
 
-  const handleProductSubmit = () => {
+  const handleProductSubmit = async () => {
     if (!productInput.trim()) return;
     setDemoState('loading');
+    setResults(null);
     
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      const data = await analyzeProduct(productInput);
+      setApiStatus({
+        gemini_used: data.gemini_used,
+        fallback_used: data.fallback_used,
+        fallback_reason: data.fallback_reason
+      });
       setResults({
-        score: 82,
-        metrics: {
-          footTraffic: { level: 'High', score: 89 },
-          competition: { level: 'Low', score: 78 },
-          spendingPower: { level: 'Very High', score: 94 },
-          populationDensity: { level: 'High', score: 85 },
-        },
-        recommendations: [
-          { 
-            title: 'Downtown Financial District', 
-            explanation: 'Your product matches the professional demographic perfectly.' 
-          },
-          { 
-            title: 'Tech Hub - Eastside', 
-            explanation: 'High concentration of early adopters for innovative products.' 
-          },
-          { 
-            title: 'University District', 
-            explanation: 'Young, engaged audience with strong word-of-mouth potential.' 
-          },
-        ],
+        ...data,
+        inputValue: productInput,
+        flowType: 'product',
       });
       setDemoState('results');
-    }, 2000);
+    } catch (error) {
+      console.error('API Error:', error);
+      setResults({
+        product: productInput,
+        recommendations: [],
+        error: error instanceof Error ? error.message : 'Failed to analyze product',
+        inputValue: productInput,
+        flowType: 'product',
+      });
+      setDemoState('results');
+    }
   };
 
   const resetDemo = () => {
@@ -101,10 +113,26 @@ export function DemoFlow({ demoState, setDemoState, onClose }: DemoFlowProps) {
     setProductInput('');
     setBudget('');
     setResults(null);
+    setIsPremiumUnlocked(false);
+    setShowLoginModal(false);
   };
 
-  if (demoState === 'selection') {
-    return (
+  const handleUpgradeClick = () => {
+    if (isPremiumUnlocked) {
+      setDemoState('premium');
+    } else {
+      setShowLoginModal(true);
+    }
+  };
+
+  const handleLoginSuccess = () => {
+    setIsPremiumUnlocked(true);
+    setDemoState('premium');
+  };
+
+  // Render content based on demo state
+  const renderContent = () => {
+    if (demoState === 'selection') return (
       <section id="demo" className="min-h-screen bg-black py-20 px-6 md:px-12 lg:px-16">
         <div className="max-w-4xl mx-auto">
           <button
@@ -166,10 +194,8 @@ export function DemoFlow({ demoState, setDemoState, onClose }: DemoFlowProps) {
         </div>
       </section>
     );
-  }
 
-  if (demoState === 'location-input') {
-    return (
+    if (demoState === 'location-input') return (
       <section className="min-h-screen bg-black py-20 px-6 md:px-12 lg:px-16">
         <div className="max-w-2xl mx-auto">
           <button
@@ -236,10 +262,8 @@ export function DemoFlow({ demoState, setDemoState, onClose }: DemoFlowProps) {
         </div>
       </section>
     );
-  }
 
-  if (demoState === 'product-input') {
-    return (
+    if (demoState === 'product-input') return (
       <section className="min-h-screen bg-black py-20 px-6 md:px-12 lg:px-16">
         <div className="max-w-2xl mx-auto">
           <button
@@ -306,10 +330,8 @@ export function DemoFlow({ demoState, setDemoState, onClose }: DemoFlowProps) {
         </div>
       </section>
     );
-  }
 
-  if (demoState === 'loading') {
-    return (
+    if (demoState === 'loading') return (
       <section className="min-h-screen bg-black py-20 px-6 md:px-12 lg:px-16 flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-12 h-12 text-white animate-spin mx-auto mb-6" />
@@ -322,103 +344,209 @@ export function DemoFlow({ demoState, setDemoState, onClose }: DemoFlowProps) {
         </div>
       </section>
     );
-  }
 
-  if (demoState === 'results' && results) {
-    return (
-      <section className="min-h-screen bg-black py-20 px-6 md:px-12 lg:px-16">
-        <div className="max-w-5xl mx-auto">
-          <button
-            onClick={resetDemo}
-            className="text-gray-300 hover:text-white mb-8 flex items-center gap-2 transition-colors"
-          >
-            <ArrowLeft size={20} />
-            Start New Analysis
-          </button>
+    if (demoState === 'results' && results) {
+      const isLocationFlow = results.flowType === 'location';
+      const locationResult = isLocationFlow ? results as LocationResponse & { inputValue: string; flowType: 'location' | 'product'; error?: string } : null;
+      const productResult = !isLocationFlow ? results as ProductResponse & { inputValue: string; flowType: 'location' | 'product'; error?: string } : null;
+      
+      const displayScore = locationResult?.score || 0;
+      const displayMetrics = locationResult?.metrics;
+      const recommendations = locationResult?.recommendations || productResult?.recommendations || [];
+      
+      return (
+        <section className="min-h-screen bg-black py-20 px-6 md:px-12 lg:px-16">
+          <div className="max-w-5xl mx-auto">
+            <button
+              onClick={resetDemo}
+              className="text-gray-300 hover:text-white mb-8 flex items-center gap-2 transition-colors"
+            >
+              <ArrowLeft size={20} />
+              Start New Analysis
+            </button>
 
-          {/* Location Score */}
-          <div className="text-center mb-12">
-            <div className="inline-flex items-center justify-center w-32 h-32 rounded-full liquid-glass border-2 border-white/30 mb-4">
-              <span className="text-5xl font-bold text-white">{results.score}</span>
-            </div>
-            <p className="text-gray-300 text-lg">Location Score</p>
-          </div>
-
-          {/* Metrics Row */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12">
-            <div className="liquid-glass border border-white/10 rounded-xl p-4 text-center">
-              <p className="text-gray-400 text-sm mb-1">Foot Traffic</p>
-              <p className="text-white font-semibold">{results.metrics.footTraffic.level}</p>
-              <p className="text-gray-500 text-sm">({results.metrics.footTraffic.score}/100)</p>
-            </div>
-            <div className="liquid-glass border border-white/10 rounded-xl p-4 text-center">
-              <p className="text-gray-400 text-sm mb-1">Competition</p>
-              <p className="text-white font-semibold">{results.metrics.competition.level}</p>
-              <p className="text-gray-500 text-sm">({results.metrics.competition.score}/100)</p>
-            </div>
-            <div className="liquid-glass border border-white/10 rounded-xl p-4 text-center">
-              <p className="text-gray-400 text-sm mb-1">Spending Power</p>
-              <p className="text-white font-semibold">{results.metrics.spendingPower.level}</p>
-              <p className="text-gray-500 text-sm">({results.metrics.spendingPower.score}/100)</p>
-            </div>
-            <div className="liquid-glass border border-white/10 rounded-xl p-4 text-center">
-              <p className="text-gray-400 text-sm mb-1">Population Density</p>
-              <p className="text-white font-semibold">{results.metrics.populationDensity.level}</p>
-              <p className="text-gray-500 text-sm">({results.metrics.populationDensity.score}/100)</p>
-            </div>
-          </div>
-
-          {/* Recommendations */}
-          <h3 className="text-2xl font-semibold text-white mb-6">
-            Top Recommendations
-          </h3>
-          <div className="grid md:grid-cols-3 gap-4 mb-12">
-            {results.recommendations.map((rec, index) => (
-              <div
-                key={index}
-                className="liquid-glass border border-white/10 rounded-xl p-6 hover:border-white/30 transition-all duration-300"
-              >
-                <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center mb-4">
-                  <span className="text-white font-semibold">{index + 1}</span>
+            {/* Error Display */}
+            {results.error && (
+              <div className="mb-8 p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center gap-3">
+                <AlertCircle className="text-red-400" size={24} />
+                <div>
+                  <p className="text-red-400 font-semibold">Analysis Error</p>
+                  <p className="text-gray-300 text-sm">{results.error}</p>
                 </div>
-                <h4 className="text-lg font-semibold text-white mb-2">{rec.title}</h4>
-                <p className="text-gray-300 text-sm">{rec.explanation}</p>
               </div>
-            ))}
-          </div>
+            )}
 
-          {/* Premium Section */}
-          <div className="relative">
-            <div className="grid md:grid-cols-2 gap-4 mb-6">
-              <div className="liquid-glass border border-white/10 rounded-xl p-6 blur-sm">
-                <h4 className="text-lg font-semibold text-white mb-2">Profit Estimates</h4>
-                <p className="text-gray-300 text-sm">Detailed monthly revenue projections based on market analysis.</p>
-              </div>
-              <div className="liquid-glass border border-white/10 rounded-xl p-6 blur-sm">
-                <h4 className="text-lg font-semibold text-white mb-2">Competitor Insights</h4>
-                <p className="text-gray-300 text-sm">Deep dive into nearby competitors and market saturation.</p>
-              </div>
+            {/* Debug Badge */}
+            <div className="flex justify-center gap-3 mb-8">
+              {apiStatus.gemini_used && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/20 border border-purple-500/30 rounded-full">
+                  <Sparkles className="text-purple-400" size={16} />
+                  <span className="text-purple-300 text-sm font-medium">AI Powered</span>
+                </div>
+              )}
+              {apiStatus.fallback_used && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/20 border border-yellow-500/30 rounded-full">
+                  <AlertCircle className="text-yellow-400" size={16} />
+                  <span className="text-yellow-300 text-sm font-medium">Estimated Results</span>
+                </div>
+              )}
             </div>
 
-            {/* Unlock CTA */}
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="liquid-glass border border-white/20 rounded-2xl p-8 text-center">
-                <h4 className="text-xl font-semibold text-white mb-2">
-                  Unlock Full Report
-                </h4>
-                <p className="text-gray-300 mb-4 max-w-sm">
-                  Get detailed profit estimates, competitor analysis, and personalized recommendations.
-                </p>
-                <button className="bg-white text-black px-8 py-3 rounded-lg font-medium hover:bg-gray-100 transition-colors">
-                  Upgrade Now
-                </button>
+            {/* Location Score - Only for Location Flow */}
+            {isLocationFlow && displayScore > 0 && (
+              <div className="text-center mb-12">
+                <div className="inline-flex items-center justify-center w-32 h-32 rounded-full liquid-glass border-2 border-white/30 mb-4">
+                  <span className="text-5xl font-bold text-white">{displayScore}</span>
+                </div>
+                <p className="text-gray-300 text-lg">Location Score</p>
+              </div>
+            )}
+
+            {/* Metrics Row - Only for Location Flow */}
+            {isLocationFlow && displayMetrics && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12">
+                <div className="liquid-glass border border-white/10 rounded-xl p-4 text-center">
+                  <p className="text-gray-400 text-sm mb-1">Foot Traffic</p>
+                  <p className="text-white font-semibold">{displayMetrics.foot_traffic.level}</p>
+                  <p className="text-gray-500 text-sm">({displayMetrics.foot_traffic.score}/100)</p>
+                </div>
+                <div className="liquid-glass border border-white/10 rounded-xl p-4 text-center">
+                  <p className="text-gray-400 text-sm mb-1">Competition</p>
+                  <p className="text-white font-semibold">{displayMetrics.competition.level}</p>
+                  <p className="text-gray-500 text-sm">({displayMetrics.competition.score}/100)</p>
+                </div>
+                <div className="liquid-glass border border-white/10 rounded-xl p-4 text-center">
+                  <p className="text-gray-400 text-sm mb-1">Spending Power</p>
+                  <p className="text-white font-semibold">{displayMetrics.spending_power.level}</p>
+                  <p className="text-gray-500 text-sm">({displayMetrics.spending_power.score}/100)</p>
+                </div>
+                <div className="liquid-glass border border-white/10 rounded-xl p-4 text-center">
+                  <p className="text-gray-400 text-sm mb-1">Population Density</p>
+                  <p className="text-white font-semibold">{displayMetrics.population_density.level}</p>
+                  <p className="text-gray-500 text-sm">({displayMetrics.population_density.score}/100)</p>
+                </div>
+              </div>
+            )}
+
+            {/* Recommendations */}
+            <h3 className="text-2xl font-semibold text-white mb-6">
+              Top Recommendations
+            </h3>
+            <div className="grid md:grid-cols-3 gap-4 mb-12">
+              {recommendations.length === 0 ? (
+                <div className="col-span-3 text-center py-12">
+                  <p className="text-gray-400">No recommendations available. Please try again.</p>
+                </div>
+              ) : (
+                recommendations.map((rec, index) => (
+                  <div
+                    key={index}
+                    className="liquid-glass border border-white/10 rounded-xl p-6 hover:border-white/30 transition-all duration-300"
+                  >
+                    <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center mb-4">
+                      <span className="text-white font-semibold">{index + 1}</span>
+                    </div>
+                    <h4 className="text-lg font-semibold text-white mb-2">
+                      {'name' in rec ? rec.name : rec.area}
+                    </h4>
+                    <p className="text-gray-300 text-sm">{'reasoning' in rec ? rec.reasoning : rec.explanation || rec.reasoning}</p>
+                    {rec.tag && (
+                      <span className="inline-block mt-3 px-2 py-1 bg-white/10 rounded text-xs text-gray-300">
+                        {rec.tag}
+                      </span>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Premium Section */}
+            <div className="relative">
+              <div className="grid md:grid-cols-2 gap-4 mb-6">
+                <div className="liquid-glass border border-white/10 rounded-xl p-6 blur-sm">
+                  <h4 className="text-lg font-semibold text-white mb-2">Profit Estimates</h4>
+                  <p className="text-gray-300 text-sm">Detailed monthly revenue projections based on market analysis.</p>
+                </div>
+                <div className="liquid-glass border border-white/10 rounded-xl p-6 blur-sm">
+                  <h4 className="text-lg font-semibold text-white mb-2">Competitor Insights</h4>
+                  <p className="text-gray-300 text-sm">Deep dive into nearby competitors and market saturation.</p>
+                </div>
+              </div>
+
+              {/* Unlock CTA */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="liquid-glass border border-white/20 rounded-2xl p-8 text-center">
+                  <h4 className="text-xl font-semibold text-white mb-2">
+                    {isPremiumUnlocked ? 'Premium Unlocked' : 'Unlock Full Report'}
+                  </h4>
+                  <p className="text-gray-300 mb-4 max-w-sm">
+                    {isPremiumUnlocked 
+                      ? 'Your premium report is ready. View detailed insights now.'
+                      : 'Get detailed profit estimates, competitor analysis, and personalized recommendations.'}
+                  </p>
+                  <button 
+                    onClick={handleUpgradeClick}
+                    className="bg-white text-black px-8 py-3 rounded-lg font-medium hover:bg-gray-100 transition-colors"
+                  >
+                    {isPremiumUnlocked ? 'View Full Report' : 'Upgrade Now'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
-    );
-  }
+        </section>
+      );
+    }
+
+    if (demoState === 'premium' && results) {
+      const isLocationFlow = results.flowType === 'location';
+      const locationResult = isLocationFlow ? results as LocationResponse & { inputValue: string; flowType: 'location' | 'product'; error?: string } : null;
+      const productResult = !isLocationFlow ? results as ProductResponse & { inputValue: string; flowType: 'location' | 'product'; error?: string } : null;
+      
+      const recommendations = locationResult?.recommendations || productResult?.recommendations || [];
+      
+      const displayScore = locationResult?.score || 0;
+      const displayMetrics = locationResult?.metrics;
+
+      // Convert metrics format for PremiumDashboard
+      const dashboardMetrics = displayMetrics ? {
+        footTraffic: displayMetrics.foot_traffic,
+        competition: displayMetrics.competition,
+        spendingPower: displayMetrics.spending_power,
+        populationDensity: displayMetrics.population_density
+      } : undefined;
+
+      // Get premium insights
+      const premiumInsights = locationResult?.premium_insights || productResult?.premium_insights;
+      const marketInsight = locationResult?.market_insight;
+      const strategicRecommendation = productResult?.strategic_recommendation;
+
+      return (
+        <PremiumDashboard
+          score={displayScore}
+          inputValue={results.inputValue}
+          flowType={results.flowType}
+          metrics={dashboardMetrics}
+          recommendations={recommendations}
+          premiumInsights={premiumInsights}
+          marketInsight={marketInsight}
+          strategicRecommendation={strategicRecommendation}
+          onBack={() => setDemoState('results')}
+        />
+      );
+    }
 
   return null;
+};
+
+  return (
+    <>
+      {renderContent()}
+      <LoginModal
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        onLogin={handleLoginSuccess}
+      />
+    </>
+  );
 }

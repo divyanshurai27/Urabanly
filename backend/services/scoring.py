@@ -1,6 +1,10 @@
 import json
 import os
-from backend.services.fallback import get_fallback_data
+
+try:
+    from backend.services.fallback import get_fallback_data
+except ImportError:
+    from services.fallback import get_fallback_data
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -51,7 +55,7 @@ def analyze_location(area_name):
         "foot_traffic": f"{get_label(raw_data['foot_traffic'])} ({raw_data['foot_traffic']}/100)",
         "competition": f"{get_label(raw_data['competition'])} ({raw_data['competition']}/100)",
         "spending_power": f"{get_label(raw_data['spending_power'])} ({raw_data['spending_power']}/100)",
-        "population_density": f"{{get_label(raw_data['population_density'])}} ({raw_data['population_density']}/100)",
+        "population_density": f"{get_label(raw_data['population_density'])} ({raw_data['population_density']}/100)",
         "demand_trend": raw_data["demand_trend"],
         "area_type": raw_data["area_type"],
         "is_estimated": is_estimated,
@@ -85,12 +89,41 @@ def calculate_product_match_score(area_data, product_criteria):
 
 
 def analyze_product(product_name):
-    product_key = product_name.strip().lower().replace(" ", "_")
-
+    # Normalize product name
+    normalized = product_name.strip().lower().replace(" ", "_")
+    
+    # Try exact match first
+    product_key = normalized
+    
+    # If not found, try common variations
     if product_key not in PRODUCTS_DATA:
-        return None
-
-    product_criteria = PRODUCTS_DATA[product_key]
+        # Remove trailing 's' for plurals
+        if product_key.endswith('s') and product_key[:-1] in PRODUCTS_DATA:
+            product_key = product_key[:-1]
+        # Common synonyms
+        elif product_key in ['cafe', 'cafes', 'coffee']:
+            product_key = 'cafe'
+        elif product_key in ['restaurant', 'restaurants', 'diner']:
+            product_key = 'restaurant'
+        elif product_key in ['shop', 'store', 'retail']:
+            product_key = 'clothing_store'
+        elif product_key in ['food', 'fast_food']:
+            product_key = 'quick_service_restaurant'
+    
+    # If still not found, use generic fallback criteria
+    if product_key not in PRODUCTS_DATA:
+        # Use generic retail criteria as fallback
+        product_criteria = {
+            "min_foot_traffic": 60,
+            "min_spending_power": 60,
+            "max_competition": 80,
+            "preferred_area_types": ["Mixed", "Commercial", "Residential"],
+            "demand_preference": "Medium"
+        }
+        is_fallback = True
+    else:
+        product_criteria = PRODUCTS_DATA[product_key]
+        is_fallback = False
     recommendations = []
 
     for area_name, area_data in AREAS_DATA.items():
@@ -114,5 +147,6 @@ def analyze_product(product_name):
                 "area_type": rec["area_type"]
             }
             for rec in top_3
-        ]
+        ],
+        "is_fallback_product": is_fallback
     }
